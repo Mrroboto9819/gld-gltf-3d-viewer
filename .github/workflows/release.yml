@@ -43,9 +43,48 @@ jobs:
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
+  # Pre-create a single draft release on the GitHub side BEFORE the matrix
+  # builds. Each matrix job then uploads to that release by ID, so they
+  # never race to create the same release.
+  create-release:
     needs: check-version
     if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          BODY=$(cat <<EOF
+          Built from \`${{ github.sha }}\` on \`main\`.
+
+          See the [commit log](https://github.com/${{ github.repository }}/commits/v$VERSION) for changes.
+          EOF
+          )
+          RELEASE_ID=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/releases" \
+            -f tag_name="v$VERSION" \
+            -f name="v$VERSION" \
+            -f body="$BODY" \
+            -F draft=true \
+            -F prerelease=false \
+            -F target_commitish="${{ github.sha }}" \
+            --jq '.id')
+          echo "Created draft release id=$RELEASE_ID"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [check-version, create-release]
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -97,18 +136,34 @@ jobs:
       - name: Install JS deps
         run: bun install
 
-      - name: Build & publish release
+      - name: Build & upload to release
         uses: tauri-apps/tauri-action@v0.6.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: v${{ needs.check-version.outputs.version }}
-          releaseName: v${{ needs.check-version.outputs.version }}
-          releaseBody: |
-            Built from `${{ github.sha }}` on `main`.
-
-            See the [commit log](https://github.com/${{ github.repository }}/commits/v${{ needs.check-version.outputs.version }}) for changes.
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  # Once every matrix job has uploaded its bundles, flip the draft to a
+  # real published release. If any build failed, the release stays as a
+  # draft so we don't ship a half-built version.
+  publish-release:
+    needs: [check-version, create-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          gh api \
+            --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/releases/$RELEASE_ID" \
+            -F draft=false
+          echo "Release v${{ needs.check-version.outputs.version }} published."
