@@ -1,0 +1,26 @@
+# Logs and temp files
+*.log
+*.tmp
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Editor folders
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Local environment overrides
+*.local
