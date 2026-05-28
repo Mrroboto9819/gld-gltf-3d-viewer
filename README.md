@@ -1,4 +1,4 @@
-# GLD Viewer
+# GLB Viewer
 
 A native desktop viewer for `.glb` / `.gltf` (glTF 2.0) 3D models.
 Built with [Tauri 2](https://tauri.app/) — Rust handles disk I/O and metadata, the WebView renders the model with [Three.js](https://threejs.org) via [react-three-fiber](https://github.com/pmndrs/react-three-fiber). Single ~15 MB native binary on Windows, macOS, and Linux.
